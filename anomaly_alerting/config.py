@@ -27,8 +27,8 @@ RECIPIENT_EMAIL = RECIPIENT_EMAILS[0] if RECIPIENT_EMAILS else ""
 
 # Interactive Bridge URLs (Google Apps Script)
 # Replace with your deployed Web App URLs
-ACTION_BRIDGE_URL = "https://script.google.com/macros/s/AKfycbz39ZPugoEyzFfsGViEvFI1bvLYAxgbFjvzNvrysXCNGmCIyYWv0Na6NW9s2XDveZYw/exec"
-RERUN_BRIDGE_URL = "https://script.google.com/macros/s/AKfycbz39ZPugoEyzFfsGViEvFI1bvLYAxgbFjvzNvrysXCNGmCIyYWv0Na6NW9s2XDveZYw/exec"
+ACTION_BRIDGE_URL = "https://script.google.com/macros/s/AKfycbwaJbby5t44726b9PJvOynvcuODAjTf2vkRZeEtRg3TYf9drq5vuvz0qMDjaP1TvV1hVw/exec"
+RERUN_BRIDGE_URL = "https://script.google.com/macros/s/AKfycbwaJbby5t44726b9PJvOynvcuODAjTf2vkRZeEtRg3TYf9drq5vuvz0qMDjaP1TvV1hVw/exec"
 DISMISSAL_SHEET_ID = "17Pzl86UaSrcpvNLkTlahll3xtmCDeBjW20GzFYfUvY8"
 
 # =============================================================================
