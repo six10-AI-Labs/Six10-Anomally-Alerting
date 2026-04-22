@@ -32,34 +32,26 @@ def _escalate(current: str, new: str) -> str:
 # =============================================================================
 
 def compute_rolling_baseline(df: pd.DataFrame, metric: str,
-                              window: int, min_periods: int) -> pd.DataFrame:
+                              default_window: int, min_periods: int, 
+                              asin_overrides: dict = None) -> pd.DataFrame:
     """
     Compute rolling mean and std deviation for a metric, grouped by ASIN.
-
-    Plain English: "What has this metric averaged over the last N days for this ASIN?"
-
-    Adds: '{metric}_roll_mean', '{metric}_roll_std'
-
-    Args:
-        df: Master dataframe sorted by asin + date.
-        metric: Metric column name.
-        window: Rolling window in days (config.ROLLING_WINDOW_DAYS).
-        min_periods: Minimum days before baseline is considered valid (config.ROLLING_MIN_PERIODS).
-
-    Returns:
-        Dataframe with rolling mean and std columns appended.
+    Supports per-ASIN window overrides from config.
     """
     df = df.copy()
     df = df.sort_values(["asin", "date"])
 
-    df[f"{metric}_roll_mean"] = (
-        df.groupby("asin")[metric]
-        .transform(lambda x: x.rolling(window=window, min_periods=min_periods).mean())
-    )
-    df[f"{metric}_roll_std"] = (
-        df.groupby("asin")[metric]
-        .transform(lambda x: x.rolling(window=window, min_periods=min_periods).std())
-    )
+    def _get_rolling_stat(group, stat="mean"):
+        asin = group.name
+        # Check for ASIN-specific window in config overrides
+        window = asin_overrides.get(asin, {}).get("rolling", default_window) if asin_overrides else default_window
+        
+        roller = group.rolling(window=window, min_periods=min_periods)
+        return roller.mean() if stat == "mean" else roller.std()
+
+    df[f"{metric}_roll_mean"] = df.groupby("asin")[metric].transform(lambda x: _get_rolling_stat(x, "mean"))
+    df[f"{metric}_roll_std"]  = df.groupby("asin")[metric].transform(lambda x: _get_rolling_stat(x, "std"))
+    
     return df
 
 
@@ -107,24 +99,14 @@ def flag_rolling_anomalies(df: pd.DataFrame, metric: str,
 # =============================================================================
 
 def compute_yoy_baseline(df: pd.DataFrame, metric: str,
-                          yoy_window: int, min_history_days: int) -> pd.DataFrame:
+                          default_yoy_window: int, min_history_days: int,
+                          asin_overrides: dict = None) -> pd.DataFrame:
     """
     Compute Year-over-Year baseline for a metric, per ASIN.
-
-    Plain English: "What was this metric averaging during the same week last year?"
-
-    For each ASIN + date, looks back 365 days and takes a 7-day average
-    (3 days before + same day + 3 days after) to smooth daily noise.
-
-    Only computed for ASINs with 12+ months of data. For newer ASINs,
-    the YoY baseline column is left as NaN and the alert will note
-    "YoY comparison not available — insufficient history."
-
-    Adds: '{metric}_yoy_mean', 'yoy_available' (bool)
+    Supports per-ASIN window overrides from config.
     """
     df = df.copy()
     df = df.sort_values(["asin", "date"])
-    half_window = yoy_window // 2
 
     # Mark ASINs that have enough history for YoY
     history_days = df.groupby("asin")["date"].transform(lambda x: (x.max() - x.min()).days)
@@ -141,9 +123,14 @@ def compute_yoy_baseline(df: pd.DataFrame, metric: str,
 
         asin = row["asin"]
         date = row["date"]
+        
+        # Get ASIN-specific YoY window or default
+        yoy_window = asin_overrides.get(asin, {}).get("yoy", default_yoy_window) if asin_overrides else default_yoy_window
+        half_window = yoy_window // 2
+        
         yoy_center = date - pd.DateOffset(years=1)
 
-        # 7-day window around same date last year
+        # N-day window around same date last year
         dates_to_check = [yoy_center + pd.Timedelta(days=d) for d in range(-half_window, half_window + 1)]
         vals = [lookup.get((asin, d), np.nan) for d in dates_to_check]
         vals = [v for v in vals if not np.isnan(v)]
@@ -409,12 +396,18 @@ def run_detection(df: pd.DataFrame, config) -> pd.DataFrame:
         direction      = config.METRIC_DIRECTION.get(metric, "up")
 
         # Baseline 1: rolling
-        working = compute_rolling_baseline(working, metric, config.ROLLING_WINDOW_DAYS, config.ROLLING_MIN_PERIODS)
+        working = compute_rolling_baseline(
+            working, metric, config.ROLLING_WINDOW_DAYS, config.ROLLING_MIN_PERIODS, 
+            asin_overrides=getattr(config, "ASIN_SPECIFIC_WINDOWS", {})
+        )
         working = compute_rolling_zscore(working, metric)
         working = flag_rolling_anomalies(working, metric, thresholds, direction)
 
         # Baseline 2: YoY
-        working = compute_yoy_baseline(working, metric, config.YOY_WINDOW_DAYS, config.MIN_HISTORY_DAYS_FOR_YOY)
+        working = compute_yoy_baseline(
+            working, metric, config.YOY_WINDOW_DAYS, config.MIN_HISTORY_DAYS_FOR_YOY,
+            asin_overrides=getattr(config, "ASIN_SPECIFIC_WINDOWS", {})
+        )
         working = compute_yoy_deviation(working, metric)
         working = flag_yoy_anomalies(working, metric, yoy_thresholds, direction, config_obj=config)
 
@@ -642,7 +635,10 @@ def run_helium10_detection(helium10_history: pd.DataFrame, master_df: pd.DataFra
         working = h[["asin", "date", metric]].dropna(subset=[metric]).copy()
 
         # Rolling baseline
-        working = compute_rolling_baseline(working, metric, config.ROLLING_WINDOW_DAYS, config.ROLLING_MIN_PERIODS)
+        working = compute_rolling_baseline(
+            working, metric, config.ROLLING_WINDOW_DAYS, config.ROLLING_MIN_PERIODS,
+            asin_overrides=getattr(config, "ASIN_SPECIFIC_WINDOWS", {})
+        )
         working = compute_rolling_zscore(working, metric)
         working = flag_rolling_anomalies(working, metric, thresholds, direction)
 

@@ -6,6 +6,7 @@ import json
 import pandas as pd
 from anthropic import Anthropic
 from typing import Tuple, Optional, List
+import config
 
 def run_llm_analysis(flagged_df: pd.DataFrame, source_status: dict, run_date: str, data_date: str) -> Tuple[pd.DataFrame, str]:
     """
@@ -31,8 +32,11 @@ def run_llm_analysis(flagged_df: pd.DataFrame, source_status: dict, run_date: st
     cols_to_send = ["asin", "title", "metric", "actual_value", "expected_value", "yoy_baseline", "severity", "triggered_by", "consecutive_days"]
     llm_input_df = flagged_df[cols_to_send].copy()
     
-    # Format source status for LLM context
+    # Format source status and volatility context for LLM
     lag_context = "\n".join([f"- {k}: {v['status']} (Latest: {v['latest_date']})" for k, v in source_status.items()])
+    
+    volatile_list = getattr(config, "VOLATILE_ASINS", [])
+    volatile_context = "none" if not volatile_list else ", ".join(volatile_list)
 
     prompt = f"""
 You are an expert Amazon business analyst. You are reviewing an automated anomaly report for Six10 Ventures.
@@ -41,6 +45,9 @@ Data Date: {data_date}
 
 Source Data Status:
 {lag_context}
+
+Known Volatile/Seasonal ASINs (be more conservative with these):
+{volatile_context}
 
 Below is the list of flagged anomalies (statistics-based):
 {llm_input_df.to_json(orient='records')}

@@ -31,6 +31,14 @@ ACTION_BRIDGE_URL = "https://script.google.com/macros/s/AKfycbwaJbby5t44726b9PJv
 RERUN_BRIDGE_URL = "https://script.google.com/macros/s/AKfycbwaJbby5t44726b9PJvOynvcuODAjTf2vkRZeEtRg3TYf9drq5vuvz0qMDjaP1TvV1hVw/exec"
 DISMISSAL_SHEET_ID = "17Pzl86UaSrcpvNLkTlahll3xtmCDeBjW20GzFYfUvY8"
 
+# Monday.com Integration (Placeholders)
+MONDAY_API_KEY = "YOUR_MONDAY_API_KEY_HERE"
+MONDAY_PERSON_MAPPING = {
+    "Pranav": "BOARD_ID_FOR_PRANAV",
+    "Shashank": "BOARD_ID_FOR_SHASHANK",
+    # Add more people and their Board/Group IDs here
+}
+
 # =============================================================================
 # QUICK TUNING GUIDE — read this first
 # =============================================================================
@@ -64,8 +72,23 @@ DISMISSAL_SHEET_ID = "17Pzl86UaSrcpvNLkTlahll3xtmCDeBjW20GzFYfUvY8"
 
 # --- Short-term rolling window (catches sudden recent changes) ---
 # Plain English: "Compare today against the average of the last N days"
-# 14 days catches sudden drops/spikes quickly. 30 days would smooth too much.
-ROLLING_WINDOW_DAYS = 14
+# 30 days is the new robust baseline (increased from 14 to reduce noise).
+# Higher number = smoother baseline, less reactive to minor day-to-day variance.
+ROLLING_WINDOW_DAYS = 30
+
+# --- Flexible Overrides ---
+# Use this to set specific timeframes for products that require it.
+# Format: {"ASIN": {"rolling": 45, "yoy": 14}}
+ASIN_SPECIFIC_WINDOWS = {
+    # "B0B57LJSM6": {"rolling": 45, "yoy": 7} # Example: extra smoothing for Bromine Kit
+}
+
+# List of ASINs that are known to be highly volatile or seasonal.
+# The AI Assistant (Claude) will get this context and be more conservative
+# when sanity-checking alerts for these products.
+VOLATILE_ASINS = [
+    "B0B57LJSM6", # Bromine Kit
+]
 
 # Minimum days of data before rolling baseline is considered meaningful.
 # Avoids false alerts in the first week of a new product's history.
@@ -433,6 +456,13 @@ DISMISSED_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dis
 # Alert history file — tracks which ASIN+metric combinations have been
 # consecutively flagged across runs. Used to show "UNRESOLVED — DAY N".
 ALERT_HISTORY_FILE = os.path.join(_DATA_DIR, "outputs", "alert_history.csv")
+
+# =============================================================================
+# AI ASSISTANT CONFIG
+# =============================================================================
+# Set to True to enable Claude-based sanity checking and summarization.
+# Requires ANTHROPIC_API_KEY environment variable to be set.
+USE_LLM_ENHANCEMENTS = True
 
 
 # =============================================================================

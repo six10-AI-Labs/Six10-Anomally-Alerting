@@ -191,7 +191,7 @@ def run_pipeline(target_date: str = None) -> None:
 
     # Step 9.5: LLM Context Validation & Summarization
     llm_summary = None
-    if os.getenv("USE_LLM_ENHANCEMENTS", "False") == "True" and os.getenv("ANTHROPIC_API_KEY"):
+    if getattr(config, "USE_LLM_ENHANCEMENTS", False) and os.getenv("ANTHROPIC_API_KEY"):
         try:
             from alerting.llm_assistant import run_llm_analysis
             print("\nLLM ENHANCEMENT")

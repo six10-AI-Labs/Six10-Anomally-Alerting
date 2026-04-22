@@ -403,44 +403,17 @@ def _html_tier_header(tier: str) -> str:
     ).format(bg=bg, color=color, label=label)
 
 
-def _html_alert_row(row: pd.Series, sev: str, row_shade: bool) -> str:
+def _html_asin_row(asin: str, group_df: pd.DataFrame, sev: str, row_shade: bool) -> str:
+    """
+    Format a single ASIN (product) row in the HTML table.
+    Groups all metric alerts for this ASIN into a single row with bulleted details.
+    """
     colors = _SEV_COLORS[sev]
-    metric = row.get("metric", "")
-    asin   = row.get("asin", "")
-    title  = str(row.get("title", "")) if row.get("title") and not (isinstance(row.get("title"), float) and pd.isna(row.get("title"))) else ""
-    triggered_by_raw = row.get("triggered_by", "")
-    actual = _fmt_value(row.get("actual_value"), metric)
-    # For YoY-triggered alerts, show the YoY baseline as expected so the
-    # deviation column is meaningful (rolling mean ≈ actual for these rows)
-    yoy_base = row.get("yoy_baseline")
-    if triggered_by_raw in ("yoy", "both") and yoy_base is not None and not (isinstance(yoy_base, float) and pd.isna(yoy_base)):
-        expected = _fmt_value(yoy_base, metric)
-    elif triggered_by_raw == "absolute_threshold":
-        roll_val = row.get("expected_value")
-        if roll_val is None or (isinstance(roll_val, float) and pd.isna(roll_val)):
-            expected = "Business rule"
-        else:
-            expected = _fmt_value(roll_val, metric)
-    else:
-        expected = _fmt_value(row.get("expected_value"), metric)
-    deviation = _deviation_display(row)
-    triggered = _short_trigger(triggered_by_raw)
-    yoy_avail = row.get("yoy_available", True)
-
-    # Unresolved consecutive days badge
-    days = row.get("consecutive_days", 1)
-    unresolved_html = ""
-    if days > 1 and sev == "critical":
-        unresolved_html = f' <span style="font-size:10px;background:#fef2f2;color:#dc2626;padding:1px 5px;border-radius:3px;border:1px solid #fca5a5;font-weight:bold;margin-left:6px;">DAY {days}</span>'
-
-    bg = "#fafafa" if row_shade else "#ffffff"
-    left_border = "border-left:3px solid {c};".format(c=colors["bg"])
-
-    # Color the actual value red/amber if bad direction
-    actual_color = colors["bg"]
-
-    # BSR badge if available
-    bsr = row.get("category_bsr")
+    first_row = group_df.iloc[0]
+    title = str(first_row.get("title", "")) if first_row.get("title") and not (isinstance(first_row.get("title"), float) and pd.isna(first_row.get("title"))) else ""
+    
+    # Shared info (BSR, Unresolved Day Badge)
+    bsr = first_row.get("category_bsr")
     bsr_html = ""
     if bsr and not (isinstance(bsr, float) and pd.isna(bsr)):
         bsr_html = (
@@ -448,64 +421,119 @@ def _html_alert_row(row: pd.Series, sev: str, row_shade: bool) -> str:
             'padding:1px 5px;border-radius:3px;margin-left:4px;">BSR {v:,}</span>'
         ).format(v=int(bsr))
 
-    yoy_note = "" if yoy_avail else ' <span style="font-size:9px;color:#9ca3af;">(no YoY)</span>'
+    days = first_row.get("consecutive_days", 1)
+    unresolved_html = ""
+    if days > 1 and sev == "critical":
+        unresolved_html = f' <span style="font-size:10px;background:#fef2f2;color:#dc2626;padding:1px 5px;border-radius:3px;border:1px solid #fca5a5;font-weight:bold;margin-left:6px;">DAY {days}</span>'
 
-    td = 'style="padding:7px 10px;border-bottom:1px solid #f1f5f9;vertical-align:middle;font-size:12px;"'
-    td_first = ('style="padding:7px 10px 7px 21px;border-bottom:1px solid #f1f5f9;'
-                'vertical-align:middle;font-size:12px;' + left_border + '"')
-
-    # Dismiss link (using bridge URL from config)
-    dismiss_url = f"{config.ACTION_BRIDGE_URL}?action=dismiss&asin={asin}"
-    dismiss_html = (
-        f'<a href="{dismiss_url}" style="color:#94a3b8;text-decoration:none;font-size:16px;" '
-        f'title="Toggle ASIN Dismissal status">×</a>'
-    )
-
-    # LLM Insight/Action column content
-    llm_insight = row.get("llm_insight", "")
-    action_html = f'<div style="font-size:11px;color:#334155;">{llm_insight}</div>' if llm_insight else ""
-
-    return (
-        '<tr style="background:{bg};">'
-        '<td {td_first}>'
+    bg = "#fafafa" if row_shade else "#ffffff"
+    left_border = "border-left:3px solid {c};".format(c=colors["bg"])
+    
+    # 1. Product Info Column
+    td_first = ('style="padding:10px 10px 10px 21px;border-bottom:1px solid #f1f5f9;'
+                'vertical-align:top;font-size:12px;' + left_border + '"')
+    product_html = (
         '<div style="font-weight:600;color:#1e293b;">{title}{unresolved}</div>'
         '<div style="font-size:10px;color:#94a3b8;margin-top:1px;">{asin}{bsr}</div>'
-        '</td>'
-        '<td {td}><span style="background:#f1f5f9;padding:2px 7px;border-radius:4px;'
-        'font-size:11px;font-weight:600;">{metric}</span></td>'
-        '<td {td}><strong style="color:{actual_color};">{actual}</strong></td>'
-        '<td {td} style="padding:7px 10px;color:#64748b;">{expected}</td>'
-        '<td {td}>{deviation}{yoy_note}</td>'
-        '<td {td}><span style="font-size:10px;background:{trigger_bg};color:{trigger_text};'
-        'padding:2px 7px;border-radius:4px;">{triggered}</span></td>'
-        '<td {td} style="padding:7px 10px;border-bottom:1px solid #f1f5f9;vertical-align:middle;">{action_html}</td>'
-        '<td {td} style="text-align:center;">{dismiss}</td>'
+    ).format(title=title or asin, unresolved=unresolved_html, asin=asin, bsr=bsr_html)
+
+    # 2. Issues Column (Bulleted Metrics)
+    issues_html = '<ul style="margin:0;padding:0 0 0 14px;font-size:11px;color:#475569;line-height:1.4;">'
+    for _, row in group_df.iterrows():
+        metric = row.get("metric", "")
+        actual = _fmt_value(row.get("actual_value"), metric)
+        deviation = _deviation_display(row)
+        triggered = _short_trigger(row.get("triggered_by", ""))
+        issues_html += f'<li style="margin-bottom:3px;"><b>{metric}:</b> {actual} ({deviation}) via {triggered}</li>'
+    issues_html += '</ul>'
+
+    # 3. AI Suggestions & Insights Column
+    # Determine most significant issue (max absolute z-score or priority metric)
+    most_sig_idx = 0
+    max_z = -1
+    for i in range(len(group_df)):
+        try:
+            z = abs(float(group_df.iloc[i].get("z_score", 0)))
+            if z > max_z:
+                max_z = z
+                most_sig_idx = i
+        except: pass
+
+    insights_html = '<div style="font-size:11px;color:#334155;line-height:1.4;">'
+    for i in range(len(group_df)):
+        row = group_df.iloc[i]
+        insight = row.get("llm_insight", "")
+        if not insight:
+            insight = generate_plain_english(row)
+            
+        is_most = (i == most_sig_idx and len(group_df) > 1)
+        prefix = '<b style="color:#0369a1;">[SIGNIFICANT]</b> ' if is_most else ""
+        insights_html += f'<div style="margin-bottom:6px;">{prefix}{insight}</div>'
+    insights_html += '</div>'
+
+    # 4. Actions Column
+    action_td_style = 'style="padding:10px;border-bottom:1px solid #f1f5f9;vertical-align:top;"'
+    
+    # Dismiss ASIN
+    dismiss_url = f"{config.ACTION_BRIDGE_URL}?action=dismiss&asin={asin}"
+    actions_html = (
+        f'<div style="margin-bottom:6px;">'
+        f'<a href="{dismiss_url}" style="color:#ef4444;text-decoration:none;font-size:11px;font-weight:bold;" '
+        f'title="Stop alerting for this product">Dismiss ASIN ×</a>'
+        f'</div>'
+    )
+    
+    # Monday Buttons
+    person_mapping = getattr(config, "MONDAY_PERSON_MAPPING", {})
+    if person_mapping:
+        actions_html += '<div style="font-size:9px;color:#94a3b8;margin-bottom:4px;text-transform:uppercase;font-weight:bold;">Add to Monday:</div>'
+        actions_html += '<div style="display:flex;flex-wrap:wrap;gap:4px;">'
+        for person in person_mapping:
+            # We encode the summary to avoid breaking URLs
+            import urllib.parse
+            summary = f"Anomaly: {asin}"
+            if len(group_df) == 1:
+                summary += f" - {group_df.iloc[0].get('metric')}"
+            summary_enc = urllib.parse.quote(summary)
+            
+            monday_url = f"{config.ACTION_BRIDGE_URL}?action=monday&asin={asin}&person={person}&summary={summary_enc}"
+            actions_html += (
+                f'<a href="{monday_url}" style="background:#ede9fe;color:#7c3aed;padding:2px 6px;'
+                f'text-decoration:none;border-radius:3px;font-size:10px;font-weight:bold;border:1px solid #ddd6fe;white-space:nowrap;">'
+                f'+ {person}</a>'
+            )
+        actions_html += '</div>'
+
+    td = 'style="padding:10px;border-bottom:1px solid #f1f5f9;vertical-align:top;"'
+    
+    return (
+        '<tr style="background:{bg};">'
+        '<td {td_first}>{product_html}</td>'
+        '<td {td}>{issues_html}</td>'
+        '<td {td} style="width:35%;">{insights_html}</td>'
+        '<td {td} style="width:15%;">{actions_html}</td>'
         '</tr>'
     ).format(
         bg=bg,
         td_first=td_first, td=td,
-        title=title or asin,
-        unresolved=unresolved_html,
-        asin=asin, bsr=bsr_html,
-        metric=metric,
-        actual=actual, actual_color=actual_color,
-        expected=expected,
-        deviation=deviation, yoy_note=yoy_note,
-        trigger_bg=colors["badge_bg"], trigger_text=colors["text"],
-        triggered=triggered,
-        action_html=action_html,
-        dismiss=dismiss_html
+        product_html=product_html,
+        issues_html=issues_html,
+        insights_html=insights_html,
+        actions_html=actions_html
     )
 
 
 def _html_section(sev: str, df: pd.DataFrame) -> str:
     colors = _SEV_COLORS[sev]
-    count = len(df)
+    
+    # Group by ASIN to determine unique product count
+    unique_asins = df["asin"].unique() if not df.empty else []
+    count = len(unique_asins)
     emoji = _SEV_EMOJI[sev]
 
     # Section header bar
     sev_label = "POSITIVE SIGNALS" if sev == "improvement" else sev.upper()
-    item_word  = "metric" if sev == "improvement" else "alert"
+    item_word  = "product" if sev != "improvement" else "metric"
     header = (
         '<table width="100%" cellpadding="0" cellspacing="0" style="margin-top:16px;">'
         '<tr><td style="background:{bg};color:#fff;padding:10px 24px;'
@@ -528,24 +556,18 @@ def _html_section(sev: str, df: pd.DataFrame) -> str:
             '</table>'
         )
 
-    # Column headers (once, before first tier group)
+    # Column headers
     col_headers = (
         '<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">'
         '<thead><tr style="background:#f8fafc;">'
         '<th style="padding:6px 10px 6px 24px;text-align:left;font-size:10px;'
-        'color:#94a3b8;border-bottom:2px solid #e2e8f0;width:32%;">PRODUCT</th>'
+        'color:#94a3b8;border-bottom:2px solid #e2e8f0;width:25%;">PRODUCT</th>'
         '<th style="padding:6px 10px;text-align:left;font-size:10px;color:#94a3b8;'
-        'border-bottom:2px solid #e2e8f0;width:12%;">METRIC</th>'
+        'border-bottom:2px solid #e2e8f0;width:25%;">ISSUES</th>'
         '<th style="padding:6px 10px;text-align:left;font-size:10px;color:#94a3b8;'
-        'border-bottom:2px solid #e2e8f0;width:10%;">ACTUAL</th>'
+        'border-bottom:2px solid #e2e8f0;width:35%;">AI INSIGHTS & ACTIONS</th>'
         '<th style="padding:6px 10px;text-align:left;font-size:10px;color:#94a3b8;'
-        'border-bottom:2px solid #e2e8f0;width:10%;">EXPECTED</th>'
-        '<th style="padding:6px 10px;text-align:left;font-size:10px;color:#94a3b8;'
-        'border-bottom:2px solid #e2e8f0;width:10%;">DEVIATION</th>'
-        '<th style="padding:6px 10px;text-align:left;font-size:10px;color:#94a3b8;'
-        'border-bottom:2px solid #e2e8f0;width:15%;">AI SUGGESTION</th>'
-        '<th style="padding:6px 10px;text-align:center;font-size:10px;color:#94a3b8;'
-        'border-bottom:2px solid #e2e8f0;width:5%;">DISS</th>'
+        'border-bottom:2px solid #e2e8f0;width:15%;">ACTIONS</th>'
         '</tr></thead><tbody>'
     )
 
@@ -554,14 +576,26 @@ def _html_section(sev: str, df: pd.DataFrame) -> str:
     current_tier = None
     shade = False
 
-    for _, row in sorted_df.iterrows():
-        row_tier = row.get("tier", "")
-        if row_tier != current_tier:
-            current_tier = row_tier
-            rows_html += _html_tier_header(row_tier)
-            shade = False
-        rows_html += _html_alert_row(row, sev, shade)
-        shade = not shade
+    # Grouping logic: Iterate through tiers, then group within tier by ASIN
+    tier_order = {t: i for i, t in enumerate(TIER_SORT_ORDER)}
+    sorted_df["_tier_rank"] = sorted_df["tier"].map(tier_order).fillna(len(TIER_SORT_ORDER))
+    
+    # We iterate by tier groups
+    for row_tier in TIER_SORT_ORDER:
+        tier_df = sorted_df[sorted_df["tier"] == row_tier]
+        if tier_df.empty:
+            continue
+            
+        # Add tier header
+        rows_html += _html_tier_header(row_tier)
+        shade = False
+        
+        # Group by ASIN within this tier
+        tier_asins = tier_df["asin"].unique()
+        for asin in tier_asins:
+            asin_group = tier_df[tier_df["asin"] == asin]
+            rows_html += _html_asin_row(asin, asin_group, sev, shade)
+            shade = not shade
 
     return header + col_headers + rows_html + "</tbody></table>"
 
