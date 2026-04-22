@@ -23,18 +23,17 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-          cache: 'pip' # <--- FASTER: Automatically caches your pip dependencies
+          cache: 'pip' # Automated dependency caching
 
       # --- PERMANENT ALERT TRACKING ---
-      - name: Create Data Directories
+      - name: Setup Workspace
         run: mkdir -p anomaly_alerting/data/outputs
 
       - name: Restore Alert History Cache
         uses: actions/cache@v4
         with:
           path: anomaly_alerting/data/outputs/alert_history.csv
-          # We use run_number to ensure the cache is "new" and gets saved every time
-          key: alert-history-${{ runner.os }}-${{ github.run_number }}
+          key: alert-history-${{ runner.os }}-${{ github.run_id }}
           restore-keys: |
             alert-history-${{ runner.os }}-
             alert-history-
@@ -42,7 +41,7 @@ jobs:
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
       # --- CREDENTIAL SETUP ---
       - name: Restore Credentials from Secrets
@@ -51,6 +50,7 @@ jobs:
           GMAIL_TOKEN_JSON: ${{ secrets.GMAIL_TOKEN_JSON }}
           DOT_ENV_CONTENT: ${{ secrets.DOT_ENV_CONTENT }}
         run: |
+          # Write credentials to root where the scripts expect them
           echo "$GOOGLE_SERVICE_ACCOUNT_JSON" > anomaly-alerting-b7f70323da39.json
           echo "$GMAIL_TOKEN_JSON" > gmail_token.json
           echo "$DOT_ENV_CONTENT" > .env
@@ -60,13 +60,18 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
-          # Use target_date from either manual input or rerun payload
-          TARGET_DATE="${{ github.event.inputs.target_date || github.event.client_payload.date }}"
+          # Logic to handle both Manual Runs (inputs) and Email Reruns (client_payload)
+          RAW_INPUT="${{ github.event.inputs.target_date }}"
+          PAYLOAD_DATE="${{ github.event.client_payload.date }}"
+          
+          # Use manual input if provided, otherwise fallback to email trigger date
+          TARGET_DATE=${RAW_INPUT:-$PAYLOAD_DATE}
+
           if [ -n "$TARGET_DATE" ]; then
             echo "Starting pipeline for target date: $TARGET_DATE"
             python anomaly_alerting/main.py --date "$TARGET_DATE"
           else
-            echo "Starting pipeline for latest data"
+            echo "Starting pipeline for latest data (standard daily run)"
             python anomaly_alerting/main.py
           fi
 
