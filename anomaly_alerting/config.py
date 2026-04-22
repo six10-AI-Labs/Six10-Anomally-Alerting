@@ -29,8 +29,8 @@ RECIPIENT_EMAIL = RECIPIENT_EMAILS[0] if RECIPIENT_EMAILS else ""
 
 # Interactive Bridge URLs (Google Apps Script)
 # Replace with your deployed Web App URLs
-ACTION_BRIDGE_URL = "https://script.google.com/macros/s/AKfycbwaJbby5t44726b9PJvOynvcuODAjTf2vkRZeEtRg3TYf9drq5vuvz0qMDjaP1TvV1hVw/exec"
-RERUN_BRIDGE_URL = "https://script.google.com/macros/s/AKfycbwaJbby5t44726b9PJvOynvcuODAjTf2vkRZeEtRg3TYf9drq5vuvz0qMDjaP1TvV1hVw/exec"
+ACTION_BRIDGE_URL = "https://script.google.com/macros/s/AKfycbw_KQej6ZpEfGthntNVVS6f_KPSlL5hi1j-_mYa4bRL1nmogQ2wlUSdoJZQEeiu2-qCeQ/exec"
+RERUN_BRIDGE_URL = "https://script.google.com/macros/s/AKfycbw_KQej6ZpEfGthntNVVS6f_KPSlL5hi1j-_mYa4bRL1nmogQ2wlUSdoJZQEeiu2-qCeQ/exec"
 DISMISSAL_SHEET_ID = "17Pzl86UaSrcpvNLkTlahll3xtmCDeBjW20GzFYfUvY8"
 
 # Monday.com Integration (Placeholders)
