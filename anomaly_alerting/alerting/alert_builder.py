@@ -319,9 +319,9 @@ def _truncate(text, max_len=42) -> str:
 
 def _short_trigger(triggered_by: str) -> str:
     return {
-        "rolling":            "14-day avg",
+        "rolling":            f"{config.ROLLING_WINDOW_DAYS}-day avg",
         "yoy":               "vs last year",
-        "both":              "14-day + YoY",
+        "both":              f"{config.ROLLING_WINDOW_DAYS}-day + YoY",
         "absolute_threshold": "Business rule",
     }.get(triggered_by, triggered_by)
 
@@ -784,7 +784,7 @@ def generate_plain_english(row: pd.Series, asin_flags: dict = None) -> str:
                 return (
                     f"{label} for <strong>{product_name}</strong> is {actual_fmt} — "
                     f"{abs_diff_fmt} {abs_direction} the same week last year ({yoy_fmt}). "
-                    f"The 14-day average was {expected_fmt}.{margin_impact_suffix}{reason_suffix}{causes_suffix}"
+                    f"The {config.ROLLING_WINDOW_DAYS}-day average was {expected_fmt}.{margin_impact_suffix}{reason_suffix}{causes_suffix}"
                 )
         except (TypeError, ValueError):
             pass
@@ -796,7 +796,7 @@ def generate_plain_english(row: pd.Series, asin_flags: dict = None) -> str:
                 move_note = f" ({move_direction} unusually fast)" if move_direction else ""
                 return (
                     f"{label} for <strong>{product_name}</strong> is {actual_fmt}{move_note}, "
-                    f"{abs(z_score):.1f} standard deviations {direction} its 14-day average of {expected_fmt}. "
+                    f"{abs(z_score):.1f} standard deviations {direction} its {config.ROLLING_WINDOW_DAYS}-day average of {expected_fmt}. "
                     f"This is an unusual move for this product.{reason_suffix}{causes_suffix}"
                 )
         except (TypeError, ValueError):
@@ -807,25 +807,24 @@ def generate_plain_english(row: pd.Series, asin_flags: dict = None) -> str:
 
 def _html_top10_explanations(grouped_alerts: Dict[str, pd.DataFrame]) -> str:
     """
-    Build an HTML section with plain-English explanations for the top 10 most severe alerts.
-    Picks Criticals first (sorted by tier), then Warnings to fill up to 10.
+    Build an HTML section with plain-English explanations for the top alerts.
+    Collapsed by product (ASIN) to prevent repetition.
+    Picks Criticals first (sorted by tier), then Warnings.
     """
-    top_rows = []
+    all_summary_rows = []
     for sev in ["critical", "warning"]:
         df = grouped_alerts.get(sev, pd.DataFrame())
         if not df.empty:
-            top_rows.append(sort_by_tier(df))
-        if sum(len(r) for r in top_rows) >= 10:
-            break
-
-    if not top_rows:
+            all_summary_rows.append(sort_by_tier(df))
+    
+    if not all_summary_rows:
         return ""
-
-    combined = pd.concat(top_rows, ignore_index=True).head(10)
+        
+    combined = pd.concat(all_summary_rows, ignore_index=True)
     if combined.empty:
         return ""
 
-    # Build cross-metric context: asin → set of all flagged metrics (excl. improvement)
+    # Build cross-metric context for _pointed_reason
     asin_flags: Dict[str, set] = {}
     for sev, df in grouped_alerts.items():
         if sev == "improvement" or df.empty:
@@ -836,29 +835,63 @@ def _html_top10_explanations(grouped_alerts: Dict[str, pd.DataFrame]) -> str:
             if a:
                 asin_flags.setdefault(a, set()).add(m)
 
+    # Group by ASIN to ensure each product only appears once in the executive summary
+    # We take the maximum severity found for each ASIN to determine the color.
     rows_html = ""
-    for i, (_, row) in enumerate(combined.iterrows(), 1):
-        sev = row.get("severity", "watch")
-        colors = _SEV_COLORS.get(sev, _SEV_COLORS["watch"])
-        explanation = generate_plain_english(row, asin_flags=asin_flags)
+    processed_asins = set()
+    counter = 1
+    
+    # Iterate through combined in origin tier/severity order
+    for _, row in combined.iterrows():
+        asin = row.get("asin")
+        if asin in processed_asins:
+            continue
+        processed_asins.add(asin)
+        
+        # Get all alerts for this specific ASIN to combine their text
+        asin_df = combined[combined["asin"] == asin]
+        
+        # Use the most severe alert's color
+        best_sev = asin_df["severity"].iloc[0] 
+        colors = _SEV_COLORS.get(best_sev, _SEV_COLORS["watch"])
+        
+        # Build consolidated explanation
+        explanations = []
+        for _, alert_row in asin_df.iterrows():
+            expl = generate_plain_english(alert_row, asin_flags=asin_flags)
+            explanations.append(expl)
+        
+        # If multiple alerts, combine them with bullet points or semi-colons
+        if len(explanations) > 1:
+            # First sentence usually identifies the product, subsequent sentences add metrics
+            # We'll just join them into a list
+            final_explanation = "<br/>&bull; ".join(explanations)
+            if not final_explanation.startswith("&bull;"):
+                final_explanation = "&bull; " + final_explanation
+        else:
+            final_explanation = explanations[0]
+
         rows_html += (
             '<tr style="background:{bg};">'
-            '<td style="padding:8px 14px;font-size:12px;vertical-align:top;width:24px;'
+            '<td style="padding:10px 14px;font-size:12px;vertical-align:top;width:24px;'
             'color:{num_color};font-weight:bold;">{i}.</td>'
-            '<td style="padding:8px 14px 8px 0;font-size:12px;color:#334155;line-height:1.5;">'
+            '<td style="padding:10px 14px 10px 0;font-size:12px;color:#334155;line-height:1.5;">'
             '{explanation}</td>'
             '</tr>'
         ).format(
-            bg="#fafafa" if i % 2 == 0 else "#ffffff",
+            bg="#fafafa" if counter % 2 == 0 else "#ffffff",
             num_color=colors["bg"],
-            i=i,
-            explanation=explanation,
+            i=counter,
+            explanation=final_explanation,
         )
+        counter += 1
+        if counter > 10: # Cap at 10 unique ASINs for the high-level summary
+            break
 
     return (
         '<tr><td style="padding:16px 24px 0 24px;">'
         '<div style="font-size:11px;font-weight:bold;color:#64748b;letter-spacing:0.05em;'
-        'margin-bottom:8px;text-transform:uppercase;">Top Alerts — Plain English</div>'
+        'margin-bottom:8px;text-transform:uppercase;">Top Alerts — Executive Summary</div>'
         '<table width="100%" cellpadding="0" cellspacing="0" '
         'style="border:1px solid #e2e8f0;border-radius:6px;overflow:hidden;">'
         '{rows}'

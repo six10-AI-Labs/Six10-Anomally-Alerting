@@ -92,7 +92,7 @@ VOLATILE_ASINS = [
 
 # Minimum days of data before rolling baseline is considered meaningful.
 # Avoids false alerts in the first week of a new product's history.
-ROLLING_MIN_PERIODS = 7
+ROLLING_MIN_PERIODS = 14
 
 # --- Year-over-Year window (catches seasonal underperformance) ---
 # Plain English: "Compare today against the same week last year"
