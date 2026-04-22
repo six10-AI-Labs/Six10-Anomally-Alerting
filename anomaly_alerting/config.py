@@ -11,7 +11,9 @@ load_dotenv()
 # =============================================================================
 # SERVICE ACCOUNT & EMAIL CONFIG
 # =============================================================================
-SERVICE_ACCOUNT_FILE = os.getenv("SERVICE_ACCOUNT_FILE", "anomaly-alerting-b7f70323da39.json")
+_CONFIG_DIR = os.path.dirname(os.path.abspath(__file__))
+_DEFAULT_SA_PATH = os.path.join(_CONFIG_DIR, "service_account.json")
+SERVICE_ACCOUNT_FILE = os.getenv("SERVICE_ACCOUNT_FILE", _DEFAULT_SA_PATH)
 SENDER_EMAIL = os.getenv("SENDER_EMAIL", "ai@six10ventures.com")
 RECIPIENT_EMAIL_RAW = os.getenv("RECIPIENT_EMAIL", "")
 # Default recipients - editable here if .env is not used
@@ -27,8 +29,8 @@ RECIPIENT_EMAIL = RECIPIENT_EMAILS[0] if RECIPIENT_EMAILS else ""
 
 # Interactive Bridge URLs (Google Apps Script)
 # Replace with your deployed Web App URLs
-ACTION_BRIDGE_URL = "https://script.google.com/macros/s/AKfycbw-2d82FGOLF4JD1DrBJFxzO1sIOhYTiQym9h9yqK8zaxUljlj3MHcXPeArmccQzJbMyg/exec"
-RERUN_BRIDGE_URL = "https://script.google.com/macros/s/AKfycbw-2d82FGOLF4JD1DrBJFxzO1sIOhYTiQym9h9yqK8zaxUljlj3MHcXPeArmccQzJbMyg/exec"
+ACTION_BRIDGE_URL = "https://script.google.com/macros/s/AKfycbwaJbby5t44726b9PJvOynvcuODAjTf2vkRZeEtRg3TYf9drq5vuvz0qMDjaP1TvV1hVw/exec"
+RERUN_BRIDGE_URL = "https://script.google.com/macros/s/AKfycbwaJbby5t44726b9PJvOynvcuODAjTf2vkRZeEtRg3TYf9drq5vuvz0qMDjaP1TvV1hVw/exec"
 DISMISSAL_SHEET_ID = "17Pzl86UaSrcpvNLkTlahll3xtmCDeBjW20GzFYfUvY8"
 
 # Monday.com Integration (Placeholders)
