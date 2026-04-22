@@ -270,13 +270,40 @@ def filter_alerts(flagged_df: pd.DataFrame, dismissed_asins: list = None) -> pd.
 
     df = flagged_df.copy()
 
-    # Apply ASIN dismissal filter (fetched from Google Sheet via main.py)
-    if dismissed_asins:
+    # Apply ASIN dismissal filter (fetched from Google Sheet)
+    if dismissed_asins and isinstance(dismissed_asins, dict):
+        eternal = dismissed_asins.get("eternal", [])
+        temporary = dismissed_asins.get("temporary", {}) # asin -> date_added
+        
+        # 1. Eternal: Filter out completely
         count_before = len(df)
-        df = df[~df["asin"].isin(dismissed_asins)]
+        df = df[~df["asin"].isin(eternal)]
+        
+        # 2. Temporary: Filter out only if < 30 days old
+        from datetime import datetime
+        try:
+            run_dt = datetime.strptime(config.get_run_date(), "%Y-%m-%d")
+        except:
+            run_dt = datetime.now()
+
+        def is_silenced(row):
+            asin = row["asin"]
+            if asin not in temporary:
+                return False
+            added_str = temporary[asin]
+            try:
+                added_dt = datetime.strptime(added_str, "%Y-%m-%d")
+                # Silence for 30 days
+                diff = (run_dt - added_dt).days
+                return diff <= 30
+            except:
+                return True # Silence if date format is invalid to be safe
+
+        df = df[~df.apply(is_silenced, axis=1)]
+        
         count_after = len(df)
         if count_before > count_after:
-            print(f"  [Filter] Excluded {count_before - count_after} alerts for ASINs marked as 'Dismissed' in Sheet.")
+            print(f"  [Filter] Excluded {count_before - count_after} alerts (Eternal or 30-day Board silent).")
 
     improvements = df[df["severity"] == "improvement"]
     alerts = df[df["severity"] != "improvement"]
@@ -403,7 +430,7 @@ def _html_tier_header(tier: str) -> str:
     ).format(bg=bg, color=color, label=label)
 
 
-def _html_asin_row(asin: str, group_df: pd.DataFrame, sev: str, row_shade: bool) -> str:
+def _html_asin_row(asin: str, group_df: pd.DataFrame, sev: str, row_shade: bool, persistent_asins: dict = None) -> str:
     """
     Format a single ASIN (product) row in the HTML table.
     Groups all metric alerts for this ASIN into a single row with bulleted details.
@@ -464,7 +491,7 @@ def _html_asin_row(asin: str, group_df: pd.DataFrame, sev: str, row_shade: bool)
         row = group_df.iloc[i]
         insight = row.get("llm_insight", "")
         if not insight:
-            insight = generate_plain_english(row)
+            insight = generate_plain_english(row, asin_flags=asin_flags, persistent_asins=persistent_asins)
             
         is_most = (i == most_sig_idx and len(group_df) > 1)
         prefix = '<b style="color:#0369a1;">[SIGNIFICANT]</b> ' if is_most else ""
@@ -523,7 +550,7 @@ def _html_asin_row(asin: str, group_df: pd.DataFrame, sev: str, row_shade: bool)
     )
 
 
-def _html_section(sev: str, df: pd.DataFrame) -> str:
+def _html_section(sev: str, df: pd.DataFrame, persistent_asins: dict = None) -> str:
     colors = _SEV_COLORS[sev]
     
     # Group by ASIN to determine unique product count
@@ -594,7 +621,7 @@ def _html_section(sev: str, df: pd.DataFrame) -> str:
         tier_asins = tier_df["asin"].unique()
         for asin in tier_asins:
             asin_group = tier_df[tier_df["asin"] == asin]
-            rows_html += _html_asin_row(asin, asin_group, sev, shade)
+            rows_html += _html_asin_row(asin, asin_group, sev, shade, persistent_asins=persistent_asins)
             shade = not shade
 
     return header + col_headers + rows_html + "</tbody></table>"
@@ -700,7 +727,9 @@ def generate_plain_english(row: pd.Series, asin_flags: dict = None) -> str:
         asin_flags: Dict mapping asin → set of flagged metrics across the full run.
                     Used to derive a pointed cross-metric observation instead of a
                     generic cause list. Pass None to fall back to generic hints.
+        persistent_asins: Dict mapping asin -> info (id, date) if added to board > 30 days ago.
     """
+    persistent_asins = kwargs.get("persistent_asins", {})
     metric = row.get("metric", "")
     actual = row.get("actual_value")
     expected = row.get("expected_value")
@@ -763,13 +792,23 @@ def generate_plain_english(row: pd.Series, asin_flags: dict = None) -> str:
         except (TypeError, ValueError):
             pass
 
-    if triggered_by == "absolute_threshold":
-        return (
-            f"{label} for <strong>{product_name}</strong> has hit a business-critical threshold "
-            f"at {actual_fmt}. This triggers an alert regardless of trend.{reason_suffix}{causes_suffix}"
+    # Persistent warning if re-activated after 30 days
+    persistence_warning = ""
+    if asin in persistent_asins:
+        added_date = persistent_asins[asin].get("date", "N/A")
+        persistence_warning = (
+            f" <span style='color:#b91c1c;font-weight:bold;'>"
+            f"Alert re-activated: Product was added to Board on {added_date} but issue persists.</span>"
         )
 
-    if triggered_by in ("yoy", "both") and yoy_baseline is not None:
+    base_explanation = f"{label} for <strong>{product_name}</strong> is {actual_fmt} vs expected {expected_fmt}."
+    
+    if triggered_by == "absolute_threshold":
+        base_explanation = (
+            f"{label} for <strong>{product_name}</strong> has hit a business-critical threshold "
+            f"at {actual_fmt}. This triggers an alert regardless of trend."
+        )
+    elif triggered_by in ("yoy", "both") and yoy_baseline is not None:
         try:
             if not pd.isna(yoy_baseline) and actual is not None and not pd.isna(actual):
                 diff = actual - yoy_baseline
@@ -781,31 +820,28 @@ def generate_plain_english(row: pd.Series, asin_flags: dict = None) -> str:
                 else:
                     abs_diff_fmt = f"{abs(diff):,.2f}"
                 yoy_fmt = _fmt_value(yoy_baseline, metric)
-                return (
+                base_explanation = (
                     f"{label} for <strong>{product_name}</strong> is {actual_fmt} — "
                     f"{abs_diff_fmt} {abs_direction} the same week last year ({yoy_fmt}). "
-                    f"The {config.ROLLING_WINDOW_DAYS}-day average was {expected_fmt}.{margin_impact_suffix}{reason_suffix}{causes_suffix}"
+                    f"The {config.ROLLING_WINDOW_DAYS}-day average was {expected_fmt}."
                 )
-        except (TypeError, ValueError):
-            pass
-
-    if z_score is not None:
+        except: pass
+    elif z_score is not None:
         try:
             if not pd.isna(z_score):
                 direction = "above" if z_score > 0 else "below"
                 move_note = f" ({move_direction} unusually fast)" if move_direction else ""
-                return (
+                base_explanation = (
                     f"{label} for <strong>{product_name}</strong> is {actual_fmt}{move_note}, "
                     f"{abs(z_score):.1f} standard deviations {direction} its {config.ROLLING_WINDOW_DAYS}-day average of {expected_fmt}. "
-                    f"This is an unusual move for this product.{reason_suffix}{causes_suffix}"
+                    f"This is an unusual move for this product."
                 )
-        except (TypeError, ValueError):
-            pass
+        except: pass
 
-    return f"{label} for <strong>{product_name}</strong> is {actual_fmt} vs expected {expected_fmt}.{reason_suffix}"
+    return f"{base_explanation}{persistence_warning}{margin_impact_suffix}{reason_suffix}{causes_suffix}"
 
 
-def _html_top10_explanations(grouped_alerts: Dict[str, pd.DataFrame]) -> str:
+def _html_top10_explanations(grouped_alerts: Dict[str, pd.DataFrame], persistent_asins: dict = None) -> str:
     """
     Build an HTML section with plain-English explanations for the top alerts.
     Collapsed by product (ASIN) to prevent repetition.
@@ -858,7 +894,7 @@ def _html_top10_explanations(grouped_alerts: Dict[str, pd.DataFrame]) -> str:
         # Build consolidated explanation
         explanations = []
         for _, alert_row in asin_df.iterrows():
-            expl = generate_plain_english(alert_row, asin_flags=asin_flags)
+            expl = generate_plain_english(alert_row, asin_flags=asin_flags, persistent_asins=persistent_asins)
             explanations.append(expl)
         
         # If multiple alerts, combine them with bullet points or semi-colons
@@ -900,7 +936,7 @@ def _html_top10_explanations(grouped_alerts: Dict[str, pd.DataFrame]) -> str:
 
 
 def build_html_body(grouped_alerts: Dict[str, pd.DataFrame], run_date: str, data_date: str = None, 
-                    source_status: dict = None, llm_summary: str = None) -> str:
+                    source_status: dict = None, llm_summary: str = None, persistent_asins: dict = None) -> str:
     """
     Build a scannable HTML email body — one row per alert, color-coded by severity,
     grouped by tier within each severity section.
@@ -939,9 +975,9 @@ def build_html_body(grouped_alerts: Dict[str, pd.DataFrame], run_date: str, data
         run_date_fmt = run_date
         data_dt = None
 
-    sections = "".join(_html_section(sev, grouped_alerts.get(sev, pd.DataFrame()))
+    sections = "".join(_html_section(sev, grouped_alerts.get(sev, pd.DataFrame()), persistent_asins=persistent_asins)
                        for sev in SEVERITY_SORT_ORDER)
-    improvements_section = _html_section("improvement", grouped_alerts.get("improvement", pd.DataFrame()))
+    improvements_section = _html_section("improvement", grouped_alerts.get("improvement", pd.DataFrame()), persistent_asins=persistent_asins)
 
     # Build Lag Report HTML
     lag_html = ""
@@ -1057,7 +1093,7 @@ def build_html_body(grouped_alerts: Dict[str, pd.DataFrame], run_date: str, data
         unique_asins=unique_asins,
         llm_box=llm_box,
         legend=_html_legend(),
-        top10=_html_top10_explanations(grouped_alerts),
+        top10=_html_top10_explanations(grouped_alerts, persistent_asins=persistent_asins),
         sections=sections,
         improvements_section=improvements_section,
         run_date=run_date,
@@ -1068,7 +1104,7 @@ def build_html_body(grouped_alerts: Dict[str, pd.DataFrame], run_date: str, data
 
 
 def build_alert_payload(flagged_df: pd.DataFrame, run_date: str, data_date: str = None, 
-                        source_status: dict = None, llm_summary: str = None) -> dict:
+                        source_status: dict = None, llm_summary: str = None, persistent_asins: dict = None) -> dict:
     """
     Full alert building pipeline — takes detection output, returns subject + body.
 
@@ -1094,11 +1130,11 @@ def build_alert_payload(flagged_df: pd.DataFrame, run_date: str, data_date: str 
 
         return {
             "subject": f"[Six10 Alerts] {run_date} | No alerts today",
-            "body": build_html_body({}, run_date, data_date=data_date, source_status=source_status, llm_summary=llm_summary),
+            "body": build_html_body({}, run_date, data_date=data_date, source_status=source_status, llm_summary=llm_summary, persistent_asins=persistent_asins),
             "content_type": "html"
         }
 
     grouped = group_alerts_by_severity(flagged_df)
     subject = build_email_subject(grouped, run_date)
-    body = build_html_body(grouped, run_date, data_date=data_date, source_status=source_status, llm_summary=llm_summary)
+    body = build_html_body(grouped, run_date, data_date=data_date, source_status=source_status, llm_summary=llm_summary, persistent_asins=persistent_asins)
     return {"subject": subject, "body": body, "content_type": "html"}

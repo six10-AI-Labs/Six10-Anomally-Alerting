@@ -184,8 +184,26 @@ def run_pipeline(target_date: str = None) -> None:
         export_alerts_to_excel(flagged_df, run_date)
 
     # Step 9: Apply noise filters (tier/severity suppression + Google Sheet mutes)
-    dismissed_asins = get_dismissed_asins(config.DISMISSAL_SHEET_ID)
-    flagged_df = filter_alerts(flagged_df, dismissed_asins=dismissed_asins)
+    dismissed_data = get_dismissed_asins(config.DISMISSAL_SHEET_ID)
+    flagged_df = filter_alerts(flagged_df, dismissed_asins=dismissed_data)
+    
+    # Identify Persistent ASINs (Added to board > 30 days ago) for special notes
+    persistent_asins = {}
+    if isinstance(dismissed_data, dict):
+        temporary = dismissed_data.get("temporary", {})
+        try:
+            run_dt = datetime.strptime(run_date, "%Y-%m-%d")
+        except:
+            run_dt = datetime.now()
+            
+        for asin, added_str in temporary.items():
+            try:
+                added_dt = datetime.strptime(added_str, "%Y-%m-%d")
+                if (run_dt - added_dt).days > 30:
+                    persistent_asins[asin] = {"date": added_str}
+            except:
+                pass
+
     n_alerts = len(flagged_df) if not flagged_df.empty else 0
     print(f"  {n_alerts} alerts after filtering.")
 
@@ -203,7 +221,7 @@ def run_pipeline(target_date: str = None) -> None:
 
     # Step 10: Build email
     print("\nALERTING")
-    payload = build_alert_payload(flagged_df, run_date, data_date=data_date, source_status=source_status, llm_summary=llm_summary)
+    payload = build_alert_payload(flagged_df, run_date, data_date=data_date, source_status=source_status, llm_summary=llm_summary, persistent_asins=persistent_asins)
 
     # Step 11: Send
     success = send_email(

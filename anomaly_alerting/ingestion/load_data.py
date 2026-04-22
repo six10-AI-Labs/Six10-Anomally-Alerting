@@ -627,31 +627,51 @@ def get_dismissed_asins(sheet_id: str) -> list:
     try:
         from googleapiclient.discovery import build
         service = build('sheets', 'v4', credentials=service_account.Credentials.from_service_account_file(
-            config.SERVICE_ACCOUNT_FILE, scopes=['https://www.googleapis.com/auth/spreadsheets.readonly']
+            config.SERVICE_ACCOUNT_FILE, scopes=['https://www.googleapis.com/auth/spreadsheets']
         ))
         
-        # Read the first sheet (assumes ASIN is col A, Status is col B)
+        # Read the first sheet (assumes ASIN is Col A, Status is Col B, DateAdded is Col C)
         result = service.spreadsheets().values().get(
-            spreadsheetId=sheet_id, range='A:B'
+            spreadsheetId=sheet_id, range='A:C'
         ).execute()
         
         values = result.get('values', [])
-        if not values:
-            print("  No data found in dismissal sheet.")
-            return []
+        
+        # Scenario: Empty Sheet -> Initialize Headers
+        if not values or len(values) == 0:
+            print("  Sheet is empty. Initializing headers...")
+            header_row = [["ASIN", "Status", "DateAdded", "Notes"]]
+            service.spreadsheets().values().update(
+                spreadsheetId=sheet_id,
+                range='A1',
+                valueInputOption='RAW',
+                body={'values': header_row}
+            ).execute()
+            return {"eternal": [], "temporary": {}}
 
-        # Find ASINs with 'Dismissed' status
-        dismissed = []
-        for row in values[1:]: # Skip header
+        # Find ASINs with 'Dismissed' status or 'Added to Board'
+        eternal_dismissed = []
+        temporary_silence = {} # asin -> date_added_str
+
+        for row in values[1:]: # Skip headers
             if len(row) >= 2:
                 asin = row[0].strip()
                 status = row[1].strip()
-                if status == "Dismissed" and asin:
-                    dismissed.append(asin)
+                date_added = row[2].strip() if len(row) >= 3 else ""
+                
+                if not asin: continue
+                
+                if status == "Dismissed":
+                    eternal_dismissed.append(asin)
+                elif status == "Added to Board":
+                    temporary_silence[asin] = date_added
         
-        print(f"  Found {len(dismissed)} ASIN(s) marked as 'Dismissed' in Google Sheet.")
-        return dismissed
+        print(f"  Dismissal Sync: {len(eternal_dismissed)} Eternal, {len(temporary_silence)} Temporary.")
+        return {
+            "eternal": eternal_dismissed,
+            "temporary": temporary_silence
+        }
 
     except Exception as e:
-        print(f"  [ERROR] Failed to read dismissal Google Sheet: {e}")
-        return []
+        print(f"  [ERROR] Failed to read/initialize dismissal Google Sheet: {e}")
+        return {"eternal": [], "temporary": {}}
