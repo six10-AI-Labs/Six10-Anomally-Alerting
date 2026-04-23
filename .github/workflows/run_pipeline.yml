@@ -37,16 +37,24 @@ jobs:
           GMAIL_TOKEN_JSON: ${{ secrets.GMAIL_TOKEN_JSON }}
           DOT_ENV_CONTENT: ${{ secrets.DOT_ENV_CONTENT }}
         run: |
-          echo "$GOOGLE_SERVICE_ACCOUNT_JSON" > anomaly_alerting/anomaly-alerting-b7f70323da39.json
-          echo "$GMAIL_TOKEN_JSON" > anomaly_alerting/gmail_token.json
-          echo "$DOT_ENV_CONTENT" > anomaly_alerting/.env
+          # Ensure anomaly_alerting directory exists
+          mkdir -p anomaly_alerting
+          
+          # Write credentials using printf (safest for JSON/Secret content)
+          printf "%s" "$GOOGLE_SERVICE_ACCOUNT_JSON" > anomaly_alerting/service_account.json
+          printf "%s" "$GMAIL_TOKEN_JSON" > anomaly_alerting/gmail_token.json
+          printf "%s" "$DOT_ENV_CONTENT" > anomaly_alerting/.env
+          
+          # Debug: Verify files were created
+          echo "Verified files in anomaly_alerting/:"
+          ls -l anomaly_alerting/
 
       - name: Run Pipeline
         run: |
           # Determine date from inputs or dispatch payload
           TARGET_DATE="${{ github.event.inputs.date || github.event.client_payload.date }}"
           
-          # Use PYTHONPATH to ensure imports work correctly
+          # Use PYTHONPATH to ensure main.py can find internal modules
           export PYTHONPATH=$PYTHONPATH:$(pwd)/anomaly_alerting
           
           if [ -n "$TARGET_DATE" ]; then
