@@ -430,7 +430,7 @@ def _html_tier_header(tier: str) -> str:
     ).format(bg=bg, color=color, label=label)
 
 
-def _html_asin_row(asin: str, group_df: pd.DataFrame, sev: str, row_shade: bool, persistent_asins: dict = None) -> str:
+def _html_asin_row(asin: str, group_df: pd.DataFrame, sev: str, row_shade: bool, asin_flags: dict = None, persistent_asins: dict = None) -> str:
     """
     Format a single ASIN (product) row in the HTML table.
     Groups all metric alerts for this ASIN into a single row with bulleted details.
@@ -550,7 +550,7 @@ def _html_asin_row(asin: str, group_df: pd.DataFrame, sev: str, row_shade: bool,
     )
 
 
-def _html_section(sev: str, df: pd.DataFrame, persistent_asins: dict = None) -> str:
+def _html_section(sev: str, df: pd.DataFrame, asin_flags: dict = None, persistent_asins: dict = None) -> str:
     colors = _SEV_COLORS[sev]
     
     # Group by ASIN to determine unique product count
@@ -621,7 +621,7 @@ def _html_section(sev: str, df: pd.DataFrame, persistent_asins: dict = None) -> 
         tier_asins = tier_df["asin"].unique()
         for asin in tier_asins:
             asin_group = tier_df[tier_df["asin"] == asin]
-            rows_html += _html_asin_row(asin, asin_group, sev, shade, persistent_asins=persistent_asins)
+            rows_html += _html_asin_row(asin, asin_group, sev, shade, asin_flags=asin_flags, persistent_asins=persistent_asins)
             shade = not shade
 
     return header + col_headers + rows_html + "</tbody></table>"
@@ -717,7 +717,7 @@ def _pointed_reason(metric: str, asin: str, asin_flags: dict, top_return_reason=
     return ""
 
 
-def generate_plain_english(row: pd.Series, asin_flags: dict = None) -> str:
+def generate_plain_english(row: pd.Series, asin_flags: dict = None, **kwargs) -> str:
     """
     Generate a 1-2 sentence plain English explanation for a single alert row.
     Makes the alert understandable to any business stakeholder.
@@ -975,9 +975,20 @@ def build_html_body(grouped_alerts: Dict[str, pd.DataFrame], run_date: str, data
         run_date_fmt = run_date
         data_dt = None
 
-    sections = "".join(_html_section(sev, grouped_alerts.get(sev, pd.DataFrame()), persistent_asins=persistent_asins)
+    # Build cross-metric context for _pointed_reason
+    asin_flags: Dict[str, set] = {}
+    for s, d in grouped_alerts.items():
+        if s == "improvement" or d.empty:
+            continue
+        for _, r in d.iterrows():
+            a = r.get("asin", "")
+            m = r.get("metric", "")
+            if a:
+                asin_flags.setdefault(a, set()).add(m)
+
+    sections = "".join(_html_section(sev, grouped_alerts.get(sev, pd.DataFrame()), asin_flags=asin_flags, persistent_asins=persistent_asins)
                        for sev in SEVERITY_SORT_ORDER)
-    improvements_section = _html_section("improvement", grouped_alerts.get("improvement", pd.DataFrame()), persistent_asins=persistent_asins)
+    improvements_section = _html_section("improvement", grouped_alerts.get("improvement", pd.DataFrame()), asin_flags=asin_flags, persistent_asins=persistent_asins)
 
     # Build Lag Report HTML
     lag_html = ""
