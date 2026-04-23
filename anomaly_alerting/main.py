@@ -233,6 +233,8 @@ def run_pipeline(target_date: str = None) -> None:
 
     # Step 12: Log result
     log_send_result(success, recipients, run_date)
+    if not success:
+        raise RuntimeError(f"Email delivery failed for {', '.join(recipients)}. Check logs for Gmail API errors.")
 
     print(f"\n{'='*60}")
     print(f"  PIPELINE COMPLETE — {run_date}")
