@@ -66,8 +66,8 @@ YOUR TASKS:
 RESPONSE FORMAT:
 Your response must be a JSON object with exactly these keys:
 - "executive_summary": "string"
-- "dismissed_alerts": [{"asin": "...", "metric": "..."}]
-- "issue_insights": [{"asin": "...", "insight": "...", "action": "..."}]
+- "dismissed_alerts": [{{ "asin": "...", "metric": "..." }}]
+- "issue_insights": [{{ "asin": "...", "insight": "...", "action": "..." }}]
 
 Optimize for token usage. Be extremely concise.
 """
