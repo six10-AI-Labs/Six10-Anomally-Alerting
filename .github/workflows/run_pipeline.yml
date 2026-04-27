@@ -2,8 +2,8 @@ name: Six10 Anomaly Alerting Pipeline
 
 on:
   schedule:
-    # Runs at 14:00 UTC (9:00 AM EST) daily
-    - cron: '0 14 * * *'
+    # Runs at 12:00 UTC (8:00 AM EDT / 7:00 AM EST) daily
+    - cron: '0 12 * * *'
   workflow_dispatch:
     inputs:
       date:
@@ -37,24 +37,16 @@ jobs:
           GMAIL_TOKEN_JSON: ${{ secrets.GMAIL_TOKEN_JSON }}
           DOT_ENV_CONTENT: ${{ secrets.DOT_ENV_CONTENT }}
         run: |
-          # Ensure anomaly_alerting directory exists
-          mkdir -p anomaly_alerting
-          
-          # Write credentials using printf (safest for JSON/Secret content)
-          printf "%s" "$GOOGLE_SERVICE_ACCOUNT_JSON" > anomaly_alerting/service_account.json
-          printf "%s" "$GMAIL_TOKEN_JSON" > anomaly_alerting/gmail_token.json
-          printf "%s" "$DOT_ENV_CONTENT" > anomaly_alerting/.env
-          
-          # Debug: Verify files were created
-          echo "Verified files in anomaly_alerting/:"
-          ls -l anomaly_alerting/
+          echo "$GOOGLE_SERVICE_ACCOUNT_JSON" > anomaly_alerting/service_account.json
+          echo "$GMAIL_TOKEN_JSON" > anomaly_alerting/gmail_token.json
+          echo "$DOT_ENV_CONTENT" > anomaly_alerting/.env
 
       - name: Run Pipeline
         run: |
           # Determine date from inputs or dispatch payload
           TARGET_DATE="${{ github.event.inputs.date || github.event.client_payload.date }}"
           
-          # Use PYTHONPATH to ensure main.py can find internal modules
+          # Use PYTHONPATH to ensure imports work correctly
           export PYTHONPATH=$PYTHONPATH:$(pwd)/anomaly_alerting
           
           if [ -n "$TARGET_DATE" ]; then
